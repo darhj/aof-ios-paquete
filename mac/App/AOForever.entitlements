@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App Sandbox: OBLIGATORIO para cualquier app de la Mac App Store. Sin esta clave
+	     App Store Connect rechaza el .pkg al subirlo. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Cliente de red: el juego abre wss://gw.aoforever.cc/ws. Sin esto el WebSocket
+	     falla dentro del sandbox y no conecta NUNCA. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- Microfono: la voz de party (getUserMedia). Va junto con NSMicrophoneUsageDescription
+	     del Info.plist; macOS pide el permiso al jugador la primera vez. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

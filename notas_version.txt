@@ -1,0 +1,5 @@
+# Notas de la version ("Novedades" / "What's New") que van a Google Play, App Store iOS y Mac.
+# Las leen subir_google_play.bat, compilar_ios_nube.bat y compilar_mac_nube.bat.
+# ES = lo que ve el jugador en espanol. EN = ingles (si falta, se usa ES).
+ES=Fixes y nueva tanda de skins
+EN=Fixes and new skins batch

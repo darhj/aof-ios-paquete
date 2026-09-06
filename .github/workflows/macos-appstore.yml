@@ -1,0 +1,220 @@
+# Compila la APP DE MAC (Mac Catalyst: el mismo proyecto de iPhone, en una ventana de
+# macOS) en un runner macOS de GitHub y SUBE el .pkg a App Store Connect (plataforma
+# macOS del mismo app record 6799763888).
+#
+# Es el hermano de ios-appstore.yml (rama ios-paquete). Vive en la rama mac-paquete y
+# usa EL MISMO paquete zip (paquete/AOForever-iOS.zip.part-*) que el iPhone: la unica
+# diferencia son los archivos de mac/ que se copian encima del proyecto antes de
+# compilar (pbxproj con SUPPORTS_MACCATALYST, Info.plist, entitlements del sandbox).
+#
+# Key ID / Issuer ID quemados (son identificadores). Lo secreto es ASC_KEY_P8.
+name: macOS - compilar (Mac Catalyst) y subir a App Store Connect
+
+on:
+  push:
+    branches: [mac-paquete]
+  workflow_dispatch:
+    inputs:
+      solo_enviar:
+        description: "Solo ENVIAR A REVISION un build ya subido (no compila)"
+        type: boolean
+        default: false
+      build_numero:
+        description: "CFBundleVersion del build a enviar (ej. 26.0902.1234); solo con solo_enviar"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  ASC_KEY_ID: 3F53QY9MCN
+  ASC_ISSUER_ID: 6cbdae36-3638-4704-b22e-efea6a42b4b2
+  # Corrida iOS cuyo artifact "cert-distribution" trae el certificado Apple Distribution
+  # (5499LMD98R) que ya existe. Se REUSA para no crear otro (Apple limita la cantidad).
+  IOS_CERT_RUN_ID: "31900073287"
+
+jobs:
+  compilar-subir:
+    # Con solo_enviar no se compila nada: va directo al job enviar-revision.
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.solo_enviar) }}
+    runs-on: macos-26
+    timeout-minutes: 90
+    outputs:
+      build_numero: ${{ steps.variante.outputs.build_numero }}
+      version_efectiva: ${{ steps.subir_mac.outputs.version_efectiva }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Elegir Xcode 26
+        run: |
+          ACTUAL=$(xcodebuild -version | head -1)
+          case "$ACTUAL" in
+            *" 26"*|*" 27"*) echo "Ya esta: $ACTUAL";;
+            *)
+              ULTIMO=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+              if [ -z "$ULTIMO" ]; then
+                echo "::error::Este runner no tiene Xcode 26 (hay: $(ls -d /Applications/Xcode*.app | tr '\n' ' '))"
+                exit 1
+              fi
+              sudo xcode-select -s "$ULTIMO"
+              ;;
+          esac
+          xcodebuild -version
+
+      - name: Rearmar el paquete (zip partido en trozos de <100MB)
+        run: |
+          cat paquete/AOForever-iOS.zip.part-* > "$RUNNER_TEMP/paquete.zip"
+          python3 -m zipfile -e "$RUNNER_TEMP/paquete.zip" "$HOME/aof_ios"
+          test -f "$HOME/aof_ios/App/www/index.html" || { echo "::error::El juego no viajo adentro del zip (falta App/www/index.html)"; exit 1; }
+          CANT=$(find "$HOME/aof_ios/App/www" -type f | wc -l | tr -d ' ')
+          echo "Archivos en App/www: $CANT"
+          if [ "$CANT" -lt 6000 ]; then
+            echo "::error::App/www quedo incompleto tras extraer ($CANT archivos; se esperan ~6400)."
+            exit 1
+          fi
+          test -f "$HOME/aof_ios/App/www/recursos/ui/conectar_clasico_base.png" || { echo "::error::Falta el arte (recursos/ui) tras extraer."; exit 1; }
+
+      - name: Aplicar la variante Mac (pbxproj + Info.plist + entitlements + Swift)
+        id: variante
+        run: |
+          set -e
+          cd "$HOME/aof_ios"
+          cp "$GITHUB_WORKSPACE/mac/AOForever.xcodeproj/project.pbxproj" AOForever.xcodeproj/project.pbxproj
+          cp "$GITHUB_WORKSPACE/mac/App/Info.plist"            App/Info.plist
+          cp "$GITHUB_WORKSPACE/mac/App/AOForever.entitlements" App/AOForever.entitlements
+          # Los .swift de mac/App son la copia de la plantilla con los retoques de Mac
+          # (resourceURL para encontrar www/, ventana con tamano minimo). Pisan a los del zip.
+          cp "$GITHUB_WORKSPACE"/mac/App/*.swift App/
+          # parche_ios.js: la variante Mac lo agrega al proyecto; si el zip no lo trae, se copia.
+          [ -f App/parche_ios.js ] || cp "$GITHUB_WORKSPACE/mac/App/parche_ios.js" App/parche_ios.js
+          # Numero de build UNICO y creciente (formato 26.MMDD.HHMM), y tokens de la plantilla.
+          NUEVO="26.$(date -u +%m%d).$(date -u +%H%M)"
+          # VERSION DE MARKETING de Mac: la MISMA que iOS (VERSION_MARKETING de
+          # cliente_ios/variables.txt, que el .bat copia a la rama). Debe ser MAYOR que la
+          # ultima aprobada en App Store Connect: Apple cierra el "train" de una version ya
+          # publicada ("train version 'X' is closed"). Fallback 1.4 si la rama no trae el archivo.
+          VERSION_MKT="$(grep -E '^VERSION_MARKETING=' "$GITHUB_WORKSPACE/variables.txt" 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' \r')"
+          [ -n "$VERSION_MKT" ] || VERSION_MKT="1.4"
+          echo "Version de marketing: $VERSION_MKT"
+          sed -i '' -e "s/@VERSION_NAME@/$VERSION_MKT/g" -e "s/@VERSION_CODE@/$NUEVO/g" -e "s/@TEAM_ID@/ZCKXY7GF3C/g" \
+              AOForever.xcodeproj/project.pbxproj App/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NUEVO" App/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION_MKT" App/Info.plist
+          plutil -lint AOForever.xcodeproj/project.pbxproj App/Info.plist App/AOForever.entitlements
+          if grep -q "@VERSION_NAME@\|@VERSION_CODE@\|@TEAM_ID@" AOForever.xcodeproj/project.pbxproj App/Info.plist; then
+            echo "::error::Quedaron tokens sin sustituir"; exit 1
+          fi
+          grep -q "SUPPORTS_MACCATALYST = YES" AOForever.xcodeproj/project.pbxproj || { echo "::error::El pbxproj de Mac no tiene SUPPORTS_MACCATALYST"; exit 1; }
+          echo "CFBundleVersion -> $NUEVO"
+          echo "build_numero=$NUEVO" >> "$GITHUB_OUTPUT"
+
+      - name: Recuperar certificados ya creados (evita el limite de Apple)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/certs_in"
+          cd "$GITHUB_WORKSPACE"
+          # 1) La ultima corrida exitosa de ESTE workflow (trae Apple Distribution + Mac Installer)
+          ULT=$(gh run list -R "$GITHUB_REPOSITORY" --workflow macos-appstore.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+          if [ -n "$ULT" ] && [ "$ULT" != "null" ]; then
+            gh run download "$ULT" -R "$GITHUB_REPOSITORY" -n certificados-mac -D certs_in 2>/dev/null && echo "Certificados de la corrida $ULT" || true
+          fi
+          # 2) Si no hay, el Apple Distribution de la corrida iOS
+          if [ -z "$(ls -A certs_in 2>/dev/null)" ]; then
+            gh run download "$IOS_CERT_RUN_ID" -R "$GITHUB_REPOSITORY" -n cert-distribution -D certs_in 2>/dev/null && echo "Apple Distribution de la corrida iOS $IOS_CERT_RUN_ID" || echo "Sin certificados previos: fastlane creara los que falten"
+          fi
+          ls -la certs_in || true
+
+      - name: Instalar la clave API de App Store Connect
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [ -z "$ASC_KEY_P8" ]; then
+            echo "::error::Falta el secret ASC_KEY_P8 (contenido del AuthKey_${ASC_KEY_ID}.p8)."
+            exit 1
+          fi
+          mkdir -p "$HOME/private_keys"
+          printf '%s' "$ASC_KEY_P8" > "$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: Compilar, firmar y subir (fastlane, Mac Catalyst)
+        id: subir_mac
+        env:
+          FASTLANE_SKIP_UPDATE_CHECK: "1"
+        run: |
+          mkdir -p "$HOME/aof_ios/fastlane"
+          cp "$GITHUB_WORKSPACE/fastlane/Fastfile" "$HOME/aof_ios/fastlane/Fastfile"
+          export ASC_KEY_PATH="$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          export CERTS_IN="$GITHUB_WORKSPACE/certs_in"
+          cd "$HOME/aof_ios"
+          # Version de marketing EFECTIVA: la de variables.txt, o la siguiente si Apple ya
+          # cerro ese train (version publicada). Se pisa en Info.plist y en el pbxproj.
+          export VERSION_MKT="$(grep -E '^VERSION_MARKETING=' "$GITHUB_WORKSPACE/variables.txt" 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' \r')"
+          fastlane version_efectiva
+          VEF="$(tr -d ' \r\n' < "$HOME/version_efectiva.txt")"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VEF" App/Info.plist
+          sed -i '' -E "s/MARKETING_VERSION = \"?[0-9.]+\"?;/MARKETING_VERSION = \"$VEF\";/g" AOForever.xcodeproj/project.pbxproj
+          printf 'VERSION_EFECTIVA_PLANA=%s\n' "$VEF"
+          echo "version_efectiva=$VEF" >> "$GITHUB_OUTPUT"
+          fastlane subir_mac
+          echo "Listo: el build de macOS quedo subido a App Store Connect."
+
+      - name: Guardar certificados (reuso futuro)
+        if: always()
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/certs_all"
+          cp -f "$GITHUB_WORKSPACE"/certs_in/* "$GITHUB_WORKSPACE/certs_all/" 2>/dev/null || true
+          cp -f "$HOME"/aof_ios/certs_out/* "$GITHUB_WORKSPACE/certs_all/" 2>/dev/null || true
+          ls -la "$GITHUB_WORKSPACE/certs_all" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: certificados-mac
+          path: certs_all/
+          if-no-files-found: ignore
+          retention-days: 90
+
+  # Envia a REVISION el build recien subido (o uno ya subido, con solo_enviar): espera que
+  # Apple lo procese, crea la version de macOS (VERSION_MARKETING de variables.txt), carga
+  # las notas (notas_version.txt), elige el build y hace Submit for Review con release
+  # automatico. Asi no queda nada pendiente para clickear en App Store Connect.
+  enviar-revision:
+    needs: [compilar-subir]
+    if: ${{ always() && (needs.compilar-subir.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.solo_enviar)) }}
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar la clave API de App Store Connect
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          [ -n "$ASC_KEY_P8" ] || { echo "::error::Falta el secret ASC_KEY_P8"; exit 1; }
+          mkdir -p "$HOME/private_keys"
+          printf '%s' "$ASC_KEY_P8" > "$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: Enviar a revision (version + notas + build + Submit for Review)
+        env:
+          FASTLANE_SKIP_UPDATE_CHECK: "1"
+          BUILD_NUMERO_INPUT: ${{ inputs.build_numero }}
+          BUILD_NUMERO_JOB: ${{ needs.compilar-subir.outputs.build_numero }}
+          VERSION_EFECTIVA_JOB: ${{ needs.compilar-subir.outputs.version_efectiva }}
+          PLATAFORMA: osx
+        run: |
+          NUMERO="${BUILD_NUMERO_INPUT:-$BUILD_NUMERO_JOB}"
+          [ -n "$NUMERO" ] || { echo "::error::No se cual build enviar (falta build_numero)"; exit 1; }
+          leer() { grep -E "^$1=" "$2" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r' | sed 's/^ *//;s/ *$//'; }
+          # La version real sale del build subido; esto es solo un respaldo.
+          export VERSION_MKT="${VERSION_EFECTIVA_JOB:-$(leer VERSION_MARKETING variables.txt)}"
+          export NOTAS_ES="$(leer ES notas_version.txt)"
+          export NOTAS_EN="$(leer EN notas_version.txt)"
+          [ -n "$NOTAS_ES" ] || { echo "::error::Falta la linea ES= en notas_version.txt de la rama (corre el .bat de nuevo)"; exit 1; }
+          echo "Build $NUMERO | version (respaldo) $VERSION_MKT | notas: $NOTAS_ES"
+          export ASC_KEY_PATH="$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          export BUILD_NUMERO="$NUMERO"
+          mkdir -p enviar/fastlane
+          cp fastlane/Fastfile enviar/fastlane/Fastfile
+          cd enviar
+          fastlane enviar_revision

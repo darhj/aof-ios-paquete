@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>es</string>
+	<key>CFBundleDisplayName</key>
+	<string>AOForever</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>AOForever</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+
+	<!-- Version "de marketing" (la que ve el jugador). Se edita a mano si algun dia se
+	     quiere pasar a 1.1; no la toca el .bat. -->
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION_NAME@</string>
+	<!-- Numero de build. Lo pone compilar_ios.bat a partir del buildId de la web, en
+	     formato punteado (26.0725.1753) para que SIEMPRE crezca: App Store Connect
+	     rechaza una subida cuyo build no sea mayor que el anterior. -->
+	<key>CFBundleVersion</key>
+	<string>@VERSION_CODE@</string>
+
+	<!-- Pantalla de lanzamiento. El dict vacio con solo el color NO es opcional: sin la
+	     clave UILaunchScreen, iOS trata la app como "legacy" y la deja con bandas negras
+	     en vez de ocupar la pantalla entera. El negro evita el flash blanco de arranque
+	     (el index del juego ya tiene fondo negro). -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>FondoLanzamiento</string>
+	</dict>
+
+	<!-- SOLO VERTICAL: la interfaz movil esta dibujada en un lienzo 360x640 (MobileFrame)
+	     y todo lo probado fue en portrait. -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+
+	<!-- MAC: sin UIRequiredDeviceCapabilities/arm64. La app de Mac sale universal (Intel +
+	     Apple Silicon) y esa clave, pensada para iPhone, solo estorba en la validacion. -->
+
+	<!-- Pantalla completa: sin barra de estado y sin que cada pantalla decida por su cuenta. -->
+	<key>UIStatusBarHidden</key>
+	<true/>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+
+	<!-- Evita el cuestionario de exportacion en CADA subida a App Store Connect. El AES
+	     del protocolo entra en la exencion estandar (cifrado de autenticacion). -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<!-- OBLIGATORIO en la Mac App Store (sin esto App Store Connect rechaza el .pkg con
+	     ITMS-90242). Es la categoria del producto: juego de rol. -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.role-playing-games</string>
+
+	<!-- VOZ DE PARTY (web/src/voz/): getUserMedia del WKWebView pide el microfono y
+	     iOS MATA la app en el acto si falta esta descripcion. El texto lo ve el jugador
+	     en el dialogo de permiso, que aparece recien al tocar "Activar voz". -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>El micrófono se usa solo para hablar con tu party dentro del juego.</string>
+
+	<!-- NO lleva NSAppTransportSecurity a proposito: el unico destino de red es
+	     wss://gw.aoforever.cc/ws, con certificado de una CA publica, y ATS lo acepta sin
+	     una sola clave. Agregar NSAllowsArbitraryLoads solo bajaria la seguridad y habria
+	     que justificarlo en la revision de Apple. -->
+</dict>
+</plist>
