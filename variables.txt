@@ -1,0 +1,28 @@
+# ============================================================
+#  AOForever iOS - TODAS las variables editables, en UN solo lugar
+#  Formato: CLAVE=valor (sin comillas). Las lineas con # se ignoran.
+#  Las lee compilar_ios.bat (y por lo tanto compilar_ios_nube.bat).
+# ============================================================
+
+# Team ID de Apple (10 caracteres). Se ve en developer.apple.com/account
+# (Detalles de la membresia). Sin esto no se puede firmar.
+TEAM_ID=ZCKXY7GF3C
+
+# Version "de marketing" que ve el jugador en el iPhone (para pasar a 1.1,
+# 1.2... se cambia ACA y se recompila; el numero de build sale solo de la web).
+VERSION_MARKETING=1.8
+
+# URL del Gateway que queda QUEMADA dentro de la app. Si cambia el tunnel
+# hay que recompilar y volver a subir.
+GATEWAY_URL=wss://gw.aoforever.cc/ws
+
+# ------------------------------------------------------------
+# Solo informativo (NO los lee el bat):
+#  - El Key ID y el Issuer ID de la API de App Store Connect estan quemados
+#    en .github/workflows/ios-appstore.yml (rama ios-paquete):
+#      ASC_KEY_ID    = US7BWQG7V4
+#      ASC_ISSUER_ID = 6cbdae36-3638-4704-b22e-efea6a42b4b2
+#  - La clave privada (AuthKey_US7BWQG7V4.p8) va SOLO en el secret ASC_KEY_P8
+#    del repo en GitHub: Settings > Secrets and variables > Actions.
+#    NUNCA commitearla.
+# ------------------------------------------------------------

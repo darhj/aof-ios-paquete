@@ -1,0 +1,206 @@
+# Fastfile — compila, firma y sube el IPA de AOForever desde el runner macOS de GitHub
+# (rama ios-paquete). Lo invoca .github/workflows/ios-appstore.yml.
+#   lane subir            -> compila + firma + sube el build a App Store Connect
+#   lane enviar_revision  -> crea la version, carga las notas, elige el build y lo
+#                            ENVIA A REVISION (release automatico al aprobarse)
+default_platform(:ios)
+
+BUNDLE_ID = "com.aoforever.cc"
+TEAM_ID   = "ZCKXY7GF3C"
+
+platform :ios do
+  lane :subir do
+    setup_ci(force: true)
+    api_key = app_store_connect_api_key(
+      key_id: ENV["ASC_KEY_ID"],
+      issuer_id: ENV["ASC_ISSUER_ID"],
+      key_filepath: ENV["ASC_KEY_PATH"]
+    )
+    keychain = File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db")
+    # Certificados guardados de corridas anteriores (Apple limita los Apple Distribution).
+    certs_in = ENV["CERTS_IN"]
+    if certs_in && Dir.exist?(certs_in)
+      Dir[File.join(certs_in, "*.p12")].each do |clave|
+        import_certificate(certificate_path: clave, keychain_path: keychain, keychain_password: "", log_output: true)
+      end
+      Dir[File.join(certs_in, "*.cer")].each do |cer|
+        import_certificate(certificate_path: cer, keychain_path: keychain, keychain_password: "", log_output: true)
+      end
+    end
+    cert(
+      api_key: api_key,
+      development: false,
+      keychain_path: keychain,
+      keychain_password: "",
+      output_path: "certs_out"
+    )
+    dist_cert_id = lane_context[SharedValues::CERT_CERTIFICATE_ID]
+    sigh(api_key: api_key, app_identifier: BUNDLE_ID, cert_id: dist_cert_id, force: true)
+    update_code_signing_settings(
+      path: "AOForever.xcodeproj",
+      use_automatic_signing: false,
+      team_id: TEAM_ID,
+      code_sign_identity: "Apple Distribution",
+      profile_name: lane_context[SharedValues::SIGH_NAME],
+      bundle_identifier: BUNDLE_ID
+    )
+    build_app(
+      project: "AOForever.xcodeproj",
+      scheme: "AOForever",
+      configuration: "Release",
+      export_method: "app-store",
+      export_team_id: TEAM_ID,
+      output_directory: "build/ipa"
+    )
+    ipa = lane_context[SharedValues::IPA_OUTPUT_PATH]
+    mb = File.size(ipa) / (1024.0 * 1024.0)
+    UI.message("IPA: #{ipa} (#{mb.round(1)} MB)")
+    # FRENO: el juego pesa >100 MB. Si el IPA sale chico, le falta el juego adentro.
+    UI.user_error!("El IPA salio de #{mb.round(1)} MB; se esperan >100 MB (le falta el juego adentro). NO se sube.") if mb < 100
+    upload_to_testflight(api_key: api_key, skip_waiting_for_build_processing: true)
+  end
+
+  # Enviar a REVISION un build ya subido. Variables de entorno (las arma el workflow):
+  #   BUILD_NUMERO = CFBundleVersion del build (ej. 26.0902.1158)
+  #   VERSION_MKT  = version de marketing (VERSION_MARKETING de variables.txt, ej. 1.4)
+  #   NOTAS_ES / NOTAS_EN = "Novedades" (notas_version.txt)
+  #   PLATAFORMA   = ios | osx
+  lane :enviar_revision do
+    api_key = app_store_connect_api_key(
+      key_id: ENV["ASC_KEY_ID"],
+      issuer_id: ENV["ASC_ISSUER_ID"],
+      key_filepath: ENV["ASC_KEY_PATH"]
+    )
+    numero   = ENV["BUILD_NUMERO"].to_s.strip
+    notas_es = ENV["NOTAS_ES"].to_s.strip
+    notas_en = ENV["NOTAS_EN"].to_s.strip
+    notas_en = notas_es if notas_en.empty?
+    es_mac   = ENV["PLATAFORMA"].to_s == "osx"
+    nombre   = es_mac ? "macOS" : "iOS"
+    UI.user_error!("Falta BUILD_NUMERO (el CFBundleVersion del build a enviar)") if numero.empty?
+    UI.user_error!("Faltan las notas de la version (linea ES= de notas_version.txt)") if notas_es.empty?
+    # Apple normaliza el numero de build (26.0902.1333 -> 26.902.1333): se compara sin ceros a la izquierda.
+    normal = lambda { |v| v.to_s.split(".").map { |c| c.sub(/\A0+(?=\d)/, "") }.join(".") }
+
+    plat = es_mac ? Spaceship::ConnectAPI::Platform::MAC_OS : Spaceship::ConnectAPI::Platform::IOS
+    app  = Spaceship::ConnectAPI::App.find(BUNDLE_ID)
+    UI.user_error!("No encuentro la app #{BUNDLE_ID} en App Store Connect") unless app
+
+    # 1) Esperar a que Apple termine de PROCESAR el build (5-30 min despues de subirlo).
+    #    La version de marketing sale del build mismo (la que quedo en su Info.plist).
+    UI.message("Esperando que Apple procese el build #{numero} (#{nombre})...")
+    limite = Time.now + 45 * 60
+    build  = nil
+    loop do
+      build  = Spaceship::ConnectAPI::Build.all(app_id: app.id, build_number: numero, platform: plat).first
+      build ||= Spaceship::ConnectAPI::Build.all(app_id: app.id, build_number: normal.call(numero), platform: plat).first
+      estado = build ? build.processing_state.to_s : "todavia no aparece"
+      break if build && estado == "VALID"
+      if %w[FAILED INVALID].include?(estado)
+        UI.user_error!("Apple marco el build #{numero} como #{estado}. Revisa el mail de App Store Connect (errores ITMS-xxxx), corregi y volve a compilar.")
+      end
+      if Time.now > limite
+        UI.user_error!("Pasaron 45 min y el build #{numero} sigue '#{estado}'. Reintenta mas tarde SIN recompilar: <bat> /enviar #{numero}")
+      end
+      UI.message("  ... #{estado}; vuelvo a mirar en 60 s")
+      sleep(60)
+    end
+    version = build.app_version.to_s
+    version = ENV["VERSION_MKT"].to_s.strip if version.empty?
+    UI.user_error!("No pude saber la version de marketing del build #{numero}") if version.empty?
+    UI.success("Build #{numero} procesado por Apple (VALID); version #{version}.")
+
+    # 1b) Si esa version YA esta en revision: con este mismo build no hay nada que hacer; con
+    #     otro build se la saca de revision (= "Remove from Review") y se reenvia con el nuevo,
+    #     asi el build mas nuevo es siempre el que queda en revision.
+    edit = app.get_edit_app_store_version(platform: plat)
+    if edit
+      estado_v = ((edit.respond_to?(:app_version_state) && edit.app_version_state) || edit.app_store_state).to_s
+      if %w[WAITING_FOR_REVIEW IN_REVIEW].include?(estado_v)
+        actual = edit.build ? normal.call(edit.build.version) : ""
+        if actual == normal.call(numero)
+          UI.success("#{nombre} #{edit.version_string} ya esta EN REVISION con este mismo build (#{numero}). Nada que hacer.")
+          next
+        end
+        UI.important("#{nombre} #{edit.version_string} estaba EN REVISION con el build #{actual.empty? ? '?' : actual}: se saca de revision para reemplazarlo por #{numero}.")
+        en_curso = app.get_in_progress_review_submission(platform: plat)
+        en_curso.cancel_submission if en_curso
+        sleep(10)
+      end
+    end
+    # Un envio armado pero no mandado (items sin submit) bloquea a deliver: se descarta.
+    listo = app.get_ready_review_submission(platform: plat, includes: "items")
+    if listo && listo.items && !listo.items.empty?
+      UI.important("Habia un envio a medio armar en App Store Connect: se descarta.")
+      listo.cancel_submission
+    end
+
+    # 2) Notas en TODOS los idiomas que ya tiene la ficha (Apple exige "Novedades" en cada uno).
+    fuente  = app.get_edit_app_store_version(platform: plat) || app.get_live_app_store_version(platform: plat)
+    locales = fuente ? fuente.get_app_store_version_localizations.map(&:locale) : []
+    locales = ["es-MX"] if locales.empty?
+    notas = {}
+    locales.each { |l| notas[l] = l.to_s.start_with?("es") ? notas_es : notas_en }
+    UI.message("Notas de la version para: #{locales.join(', ')}")
+
+    # 3) Version (se crea si no existe) + notas + build + Submit for Review.
+    #    automatic_release: se publica sola cuando Apple la aprueba (nada queda pendiente).
+    upload_to_app_store(
+      api_key: api_key,
+      app_identifier: BUNDLE_ID,
+      platform: es_mac ? "osx" : "ios",
+      app_version: version,
+      build_number: numero,
+      skip_binary_upload: true,
+      skip_screenshots: true,
+      release_notes: notas,
+      force: true,
+      run_precheck_before_submit: false,
+      precheck_include_in_app_purchases: false,
+      submit_for_review: true,
+      automatic_release: true,
+      submission_information: {
+        add_id_info_uses_idfa: false,
+        export_compliance_uses_encryption: false,
+        export_compliance_encryption_updated: false
+      }
+    )
+    UI.success("ENVIADO A REVISION: #{nombre} #{version} (build #{numero}). Se publica sola cuando Apple la apruebe.")
+  end
+
+  # Version de marketing EFECTIVA para compilar: VERSION_MKT (variables.txt) o, si Apple ya
+  # cerro ese "train" (esa version esta publicada/aprobada en iOS o en Mac), la siguiente
+  # (1.4 -> 1.5). Se mira el app record entero para que iOS y Mac queden alineadas.
+  # Escribe version_efectiva.txt (lo lee el workflow antes de compilar).
+  lane :version_efectiva do
+    app_store_connect_api_key(
+      key_id: ENV["ASC_KEY_ID"],
+      issuer_id: ENV["ASC_ISSUER_ID"],
+      key_filepath: ENV["ASC_KEY_PATH"]
+    )
+    pedida = ENV["VERSION_MKT"].to_s.strip
+    app = Spaceship::ConnectAPI::App.find(BUNDLE_ID)
+    UI.user_error!("No encuentro la app #{BUNDLE_ID} en App Store Connect") unless app
+    cerrados = %w[READY_FOR_SALE READY_FOR_DISTRIBUTION PENDING_DEVELOPER_RELEASE REPLACED_WITH_NEW_VERSION
+                  REMOVED_FROM_SALE DEVELOPER_REMOVED_FROM_SALE PROCESSING_FOR_APP_STORE PROCESSING_FOR_DISTRIBUTION]
+    mayor = nil
+    app.get_app_store_versions.each do |v|
+      estado = ((v.respond_to?(:app_version_state) && v.app_version_state) || v.app_store_state).to_s
+      next unless cerrados.include?(estado)
+      mayor = v.version_string if mayor.nil? || Gem::Version.new(v.version_string) > Gem::Version.new(mayor)
+    end
+    efectiva = pedida
+    if mayor && (pedida.empty? || Gem::Version.new(pedida) <= Gem::Version.new(mayor))
+      partes = mayor.split(".")
+      partes[-1] = (partes[-1].to_i + 1).to_s
+      efectiva = partes.join(".")
+      UI.important("VERSION_MARKETING=#{pedida} ya esta publicada/cerrada en Apple (ultima cerrada: #{mayor}): se compila como #{efectiva}.")
+    end
+    UI.user_error!("No hay version de marketing (VERSION_MARKETING vacia y nada publicado)") if efectiva.empty?
+    # Ruta ABSOLUTA: fastlane corre los lanes con cwd = carpeta fastlane/, no la del
+    # proyecto (aof_ios), asi que un nombre relativo lo dejaria en fastlane/version_efectiva.txt
+    # y el bash de despues (cwd = aof_ios) no lo encontraria ("No such file or directory").
+    File.write(File.join(ENV["HOME"], "version_efectiva.txt"), efectiva)
+    UI.success("VERSION_EFECTIVA=#{efectiva}")
+  end
+end
