@@ -113,6 +113,7 @@ jobs:
       - name: Recuperar certificados ya creados (evita el limite de Apple)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CERTS_B64: ${{ secrets.CERTS_B64 }}
         run: |
           mkdir -p "$GITHUB_WORKSPACE/certs_in"
           cd "$GITHUB_WORKSPACE"
@@ -124,6 +125,18 @@ jobs:
           # 2) Si no hay, el Apple Distribution de la corrida iOS
           if [ -z "$(ls -A certs_in 2>/dev/null)" ]; then
             gh run download "$IOS_CERT_RUN_ID" -R "$GITHUB_REPOSITORY" -n cert-distribution -D certs_in 2>/dev/null && echo "Apple Distribution de la corrida iOS $IOS_CERT_RUN_ID" || echo "Sin certificados previos: fastlane creara los que falten"
+          fi
+          # 3) Repo publico (aof-ios-paquete): la ultima corrida iOS exitosa de ESTE repo, y si no,
+          #    el secret CERTS_B64 (tar.gz base64 con los .p12/.cer del Apple Distribution del equipo).
+          #    Sin esto fastlane intenta CREAR otro Apple Distribution y Apple lo rechaza (limite).
+          if [ -z "$(ls -A certs_in 2>/dev/null)" ]; then
+            ULT=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ios-appstore.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+            if [ -n "$ULT" ] && [ "$ULT" != "null" ]; then
+              gh run download "$ULT" -R "$GITHUB_REPOSITORY" -n cert-distribution -D certs_in 2>/dev/null && echo "Apple Distribution de la corrida iOS $ULT" || true
+            fi
+          fi
+          if [ -z "$(ls -A certs_in 2>/dev/null)" ] && [ -n "$CERTS_B64" ]; then
+            printf '%s' "$CERTS_B64" | base64 -d | tar -xz -C certs_in && echo "Certificados: del secret CERTS_B64"
           fi
           ls -la certs_in || true
 
