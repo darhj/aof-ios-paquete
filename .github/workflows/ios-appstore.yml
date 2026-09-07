@@ -139,6 +139,11 @@ jobs:
           fastlane subir
           echo "Listo: el build quedo subido a App Store Connect."
           echo "build_numero=$NUEVO" >> "$GITHUB_OUTPUT"
+          # Copia del IPA firmado para dejarlo como artifact de la corrida (descargable con
+          # `gh run download <id> -R <repo> -n ipa-<build>`): App Store Connect no permite bajarlo.
+          mkdir -p "$GITHUB_WORKSPACE/ipa_out"
+          cp -f build/ipa/*.ipa "$GITHUB_WORKSPACE/ipa_out/" 2>/dev/null || true
+          ls -la "$GITHUB_WORKSPACE/ipa_out" || true
 
       - name: Guardar certificados (reuso futuro)
         if: always()
@@ -153,6 +158,14 @@ jobs:
           path: certs_all/
           if-no-files-found: ignore
           retention-days: 90
+      - name: Guardar el IPA compilado (artifact ipa-<build>, 30 dias)
+        if: steps.subir.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipa-${{ steps.subir.outputs.build_numero }}
+          path: ipa_out/*.ipa
+          if-no-files-found: warn
+          retention-days: 30
 
   # Envia a REVISION el build recien subido (o uno ya subido, con solo_enviar): espera que
   # Apple lo procese, crea la version (VERSION_MARKETING de variables.txt), carga las
