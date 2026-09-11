@@ -10,7 +10,7 @@ TEAM_ID=ZCKXY7GF3C
 
 # Version "de marketing" que ve el jugador en el iPhone (para pasar a 1.1,
 # 1.2... se cambia ACA y se recompila; el numero de build sale solo de la web).
-VERSION_MARKETING=1.10
+VERSION_MARKETING=1.11
 
 # URL del Gateway que queda QUEMADA dentro de la app. Si cambia el tunnel
 # hay que recompilar y volver a subir.
