@@ -1,5 +1,5 @@
 # Notas de la version ("Novedades" / "What's New") que van a Google Play, App Store iOS y Mac.
 # Las leen subir_google_play.bat, compilar_ios_nube.bat y compilar_mac_nube.bat.
 # ES = lo que ve el jugador en espanol. EN = ingles (si falta, se usa ES).
-ES=Arreglado el error de cliente desactualizado que dejaba afuera a la app: ahora la version se lee siempre del servidor y no de una copia vieja guardada adentro de la app. Ademas, nueva tanda de skins y cineticas, cofres misteriosos mejorados y correcciones.
-EN=Fixed the outdated client error that blocked login: the app now always reads the version from the server instead of a stale copy bundled inside the app. Also, new skins and kinetics, improved mystery chests and bug fixes.
+ES=Nuevas skins y cineticas de las tandas Eclipse, Aureo, Veneno, Fenix, Amatista y Lunar, con sus libros y efectos. El NPC demostrador ya se ve fluido y los globos de chat quedan sobre la cabeza como en el cliente de PC.
+EN=New skins and cinetics from the Eclipse, Golden, Venom, Phoenix, Amethyst and Lunar sets, with their books and effects. The demo NPC now animates smoothly and chat bubbles sit over the head like on the PC client.
