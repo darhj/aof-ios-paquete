@@ -47,6 +47,9 @@ final class JuegoViewController: UIViewController {
         // este handler (web/src/game/video/descargas.ts) y acá se escriben en
         // Documentos/AOForever y se abre la hoja de compartir. Ver archivoMensaje.
         cfg.userContentController.add(self, name: "archivo")
+        // Orientación (Opciones → Orientación del cliente, web/src/config/orientacion.ts):
+        // "vertical" (default) u "horizontal". Ver aplicarOrientacion.
+        cfg.userContentController.add(self, name: "orientacion")
 
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
@@ -117,7 +120,25 @@ final class JuegoViewController: UIViewController {
     // Pantalla completa de verdad: sin barra de estado y con la barra de gestos atenuada.
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
+    /// Orientaciones permitidas AHORA: arranca vertical (la interfaz de siempre) y pasa a
+    /// apaisado cuando el cliente lo pide (mensaje "orientacion"). El Info.plist declara
+    /// las dos familias; esta máscara es la que manda en cada momento.
+    private static var orientaciones: UIInterfaceOrientationMask = .portrait
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { Self.orientaciones }
+
+    /// Aplica el modo pedido por el juego y le pide al sistema que rote YA (iOS 16+:
+    /// requestGeometryUpdate; antes: attemptRotationToDeviceOrientation). Idempotente.
+    fileprivate func aplicarOrientacion(_ modo: String) {
+        let nueva: UIInterfaceOrientationMask = modo == "horizontal" ? .landscape : .portrait
+        if nueva == Self.orientaciones { return }
+        Self.orientaciones = nueva
+        if #available(iOS 16.0, *) {
+            setNeedsUpdateOfSupportedInterfaceOrientations()
+            view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: nueva)) { _ in }
+        } else {
+            UIViewController.attemptRotationToDeviceOrientation()
+        }
+    }
 }
 
 // MARK: - Navegación
@@ -226,6 +247,8 @@ extension JuegoViewController: WKScriptMessageHandler {
             if let texto = message.body as? String { UIPasteboard.general.string = texto }
         case "archivo":
             if let cuerpo = message.body as? [String: Any] { archivoMensaje(cuerpo) }
+        case "orientacion":
+            if let modo = message.body as? String { aplicarOrientacion(modo) }
         default:
             break
         }
