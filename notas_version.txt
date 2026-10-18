@@ -1,5 +1,5 @@
 # Notas de la version ("Novedades" / "What's New") que van a Google Play, App Store iOS y Mac.
 # Las leen subir_google_play.bat, compilar_ios_nube.bat y compilar_mac_nube.bat.
 # ES = lo que ve el jugador en espanol. EN = ingles (si falta, se usa ES).
-ES=Nuevo comando /ENVIARCARTA y /DESTRABAR
-EN=New commands /ENVIARCARTA and /DESTRABAR
+ES=Cambios en el sistema de mercado de personajes /MAO, ahora muestra skins de un personaje, cinéticas, rostros aprendidos y más info!
+EN=Changes to the /MAO character market: it now shows a character's skins, kinetics, learned faces and more info!

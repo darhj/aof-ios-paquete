@@ -128,6 +128,42 @@ platform :ios do
         sleep(10)
       end
     end
+    # 17-10-2026: Apple NO deja crear otra version (error "You cannot create a new version of the App in the
+    # current state") mientras haya una de esta plataforma en camino: en revision, aprobada y procesandose, o
+    # recien sacada de revision y todavia cambiando de estado. Se espera hasta 20 min a que se destrabe; si no,
+    # se corta con el aviso de reintentar SIN recompilar (enviar_todas lo reintenta solo mas tarde).
+    trabados = %w[WAITING_FOR_REVIEW IN_REVIEW PENDING_APPLE_RELEASE PENDING_DEVELOPER_RELEASE
+                  PROCESSING_FOR_APP_STORE PROCESSING_FOR_DISTRIBUTION WAITING_FOR_EXPORT_COMPLIANCE]
+    estado_de = lambda { |v| ((v.respond_to?(:app_version_state) && v.app_version_state) || v.app_store_state).to_s }
+    limite_v = Time.now + 20 * 60
+    ya_en_revision = false
+    loop do
+      trabada = app.get_app_store_versions.find do |v|
+        v.platform.to_s == plat.to_s && trabados.include?(estado_de.call(v))
+      end
+      break unless trabada
+      est = estado_de.call(trabada)
+      if Time.now > limite_v
+        UI.user_error!("#{nombre} #{trabada.version_string} sigue '#{est}' en Apple y no deja crear otra version todavia. Reintenta mas tarde SIN recompilar: <bat> /enviar #{numero}")
+      end
+      if %w[WAITING_FOR_REVIEW IN_REVIEW].include?(est)
+        # si es ESTE mismo build el que ya esta en revision, no hay nada que hacer
+        b_tr = (trabada.build rescue nil)
+        if b_tr && normal.call(b_tr.version) == normal.call(numero)
+          ya_en_revision = true
+          break
+        end
+        # en revision con OTRO build y no se pudo sacar arriba: se intenta sacar de nuevo
+        en_curso = app.get_in_progress_review_submission(platform: plat)
+        en_curso.cancel_submission if en_curso
+      end
+      UI.message("  ... #{nombre} #{trabada.version_string} esta '#{est}': espero 60 s a que Apple la destrabe")
+      sleep(60)
+    end
+    if ya_en_revision
+      UI.success("#{nombre} ya esta EN REVISION con este mismo build (#{numero}). Nada que hacer.")
+      next
+    end
     # Un envio armado pero no mandado (items sin submit) bloquea a deliver: se descarta.
     listo = app.get_ready_review_submission(platform: plat, includes: "items")
     if listo && listo.items && !listo.items.empty?
