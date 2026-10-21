@@ -1,4 +1,4 @@
-version=1.30
-build=2610181831
-publicado=2026-10-18T21:56:00+02:00
-avisarDesde=2026-10-20T21:56:00+02:00
+version=1.31
+build=2610210217
+publicado=2026-10-21T06:03:00+02:00
+avisarDesde=2026-10-23T06:03:00+02:00
