@@ -1,5 +1,5 @@
 # Notas de la version ("Novedades" / "What's New") que van a Google Play, App Store iOS y Mac.
 # Las leen subir_google_play.bat, compilar_ios_nube.bat y compilar_mac_nube.bat.
 # ES = lo que ve el jugador en espanol. EN = ingles (si falta, se usa ES).
-ES=Changelog actualizado en la web, nuevos comandos, nuevo cofre misterioso de rostros y mas
-EN=Changelog updated on the website, new commands, new mystery face chest and more
+ES=Nuevo mercado de cheques integrado a la app en AOForever
+EN=New check market integrated into the AOForever app
