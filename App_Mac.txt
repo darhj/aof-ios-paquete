@@ -1,7 +1,7 @@
-version=1.31
-build=2610210217
-publicado=2026-10-21T06:03:00+02:00
-avisarDesde=2026-10-23T06:03:00+02:00
-anteriorVersion=1.30
-anteriorBuild=2610181831
-anteriorAvisarDesde=2026-10-20T21:56:00+02:00
+version=1.33
+build=2610272308
+publicado=2026-10-28T02:32:00+02:00
+avisarDesde=2026-10-30T02:32:00+02:00
+anteriorVersion=1.31
+anteriorBuild=2610210217
+anteriorAvisarDesde=2026-10-23T06:03:00+02:00
