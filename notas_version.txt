@@ -1,5 +1,5 @@
 # Notas de la version ("Novedades" / "What's New") que van a Google Play, App Store iOS y Mac.
 # Las leen subir_google_play.bat, compilar_ios_nube.bat y compilar_mac_nube.bat.
 # ES = lo que ve el jugador en espanol. EN = ingles (si falta, se usa ES).
-ES=Nuevo mercado de personajes 1x1 hasta 10 personajes por 1 (10x1) en AOForever
-EN=New character market: 1x1 up to 10 characters for 1 (10x1) in AOForever
+ES=Mejoras en el mercado del juego /MAO
+EN=Improvements to the in-game market /MAO
