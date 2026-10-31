@@ -121,8 +121,10 @@ platform :ios do
       key_filepath: ENV["ASC_KEY_PATH"]
     )
     numero   = ENV["BUILD_NUMERO"].to_s.strip
-    notas_es = ENV["NOTAS_ES"].to_s.strip
-    notas_en = ENV["NOTAS_EN"].to_s.strip
+    # 01-11-2026: notas_version.txt trae TODO en una linea por idioma; un \n literal (barra + n) es un salto de
+    # linea en la tienda. Apple admite hasta 4000 caracteres por idioma.
+    notas_es = ENV["NOTAS_ES"].to_s.strip.gsub('\\n', "\n")[0, 4000].to_s
+    notas_en = ENV["NOTAS_EN"].to_s.strip.gsub('\\n', "\n")[0, 4000].to_s
     notas_en = notas_es if notas_en.empty?
     es_mac   = ENV["PLATAFORMA"].to_s == "osx"
     nombre   = es_mac ? "macOS" : "iOS"
