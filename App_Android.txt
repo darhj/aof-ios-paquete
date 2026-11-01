@@ -1,5 +1,5 @@
-build=2610312316
-publicado=2026-11-01T01:24:00+02:00
-avisarDesde=2026-11-02T01:24:00+02:00
-anteriorBuild=2610311730
-anteriorAvisarDesde=2026-11-01T19:38:00+02:00
+build=2611010139
+publicado=2026-11-01T03:47:00+02:00
+avisarDesde=2026-11-02T03:47:00+02:00
+anteriorBuild=2610312316
+anteriorAvisarDesde=2026-11-02T01:24:00+02:00
