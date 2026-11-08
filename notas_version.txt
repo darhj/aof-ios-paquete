@@ -6,7 +6,7 @@
 # ES_GOOGLE / EN_GOOGLE = version CORTA para Google Play (maximo 500 caracteres); si faltan se usa ES/EN cortado a 500.
 # En las notas no van los caracteres porcentaje, signo de admiracion de cierre, ampersand, barra vertical, mayor/menor
 # ni acento circunflejo: rompen los .bat que las muestran.
-ES=* Nueva tanda de skins y changelog actualizado en la web
-EN=* New skin batch and updated changelog on the website
-ES_GOOGLE=Nueva tanda de skins y changelog actualizado en la web
-EN_GOOGLE=New skin batch and updated changelog on the website
+ES=* Nueva tanda de skins y fixes generales en la app
+EN=* New skin batch and general fixes in the app
+ES_GOOGLE=Nueva tanda de skins y fixes generales en la app
+EN_GOOGLE=New skin batch and general fixes in the app
