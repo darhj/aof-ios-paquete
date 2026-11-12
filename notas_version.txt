@@ -6,7 +6,7 @@
 # ES_GOOGLE / EN_GOOGLE = version CORTA para Google Play (maximo 500 caracteres); si faltan se usa ES/EN cortado a 500.
 # En las notas no van los caracteres porcentaje, signo de admiracion de cierre, ampersand, barra vertical, mayor/menor
 # ni acento circunflejo: rompen los .bat que las muestran.
-ES=Nuevo idioma configurable: Portugues
-EN=New configurable language: Portuguese
-ES_GOOGLE=Nuevo idioma configurable: Portugues
-EN_GOOGLE=New configurable language: Portuguese
+ES=Nuevo sistema fotodenuncias y tanda de skins
+EN=New photo report system and a new batch of skins
+ES_GOOGLE=Nuevo sistema fotodenuncias y tanda de skins
+EN_GOOGLE=New photo report system and a new batch of skins
