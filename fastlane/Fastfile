@@ -1,0 +1,262 @@
+# Fastfile — ARDUZ: compila, firma y sube el IPA de Arduz desde el runner macOS de GitHub
+# (rama ios-arduz del repo publico darhj/aof-ios-paquete). Lo invoca .github/workflows/ios-arduz.yml.
+# Es el Fastfile de la app de iPhone de la otra app del mismo equipo de Apple (probado), con los nombres de Arduz.
+#   lane subir            -> compila + firma + sube el build a App Store Connect
+#   lane enviar_revision  -> crea la version, carga las notas, elige el build y lo
+#                            ENVIA A REVISION (release automatico al aprobarse)
+#   lane version_efectiva -> la version de marketing que Apple acepta (sube sola si la anterior ya salio)
+default_platform(:ios)
+
+# Bundle del proyecto (cliente_ios/plantilla) y de la app en App Store Connect (Apple ID 6799800836).
+BUNDLE_ID = "arduzao.com"
+APPLE_ID  = "6799800836"
+TEAM_ID   = "ZCKXY7GF3C"
+
+# La app se busca por bundle y, si no aparece, por su Apple ID (por si el app record tuviera otro bundle).
+def app_arduz
+  app = Spaceship::ConnectAPI::App.find(BUNDLE_ID)
+  app ||= (Spaceship::ConnectAPI::App.get(app_id: APPLE_ID) rescue nil)
+  UI.user_error!("No encuentro la app Arduz (#{BUNDLE_ID} / #{APPLE_ID}) en App Store Connect") unless app
+  app
+end
+
+platform :ios do
+  lane :subir do
+    setup_ci(force: true)
+    api_key = app_store_connect_api_key(
+      key_id: ENV["ASC_KEY_ID"],
+      issuer_id: ENV["ASC_ISSUER_ID"],
+      key_filepath: ENV["ASC_KEY_PATH"]
+    )
+    keychain = File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db")
+    # Certificados guardados de corridas anteriores (Apple limita los Apple Distribution).
+    certs_in = ENV["CERTS_IN"]
+    if certs_in && Dir.exist?(certs_in)
+      Dir[File.join(certs_in, "*.p12")].each do |clave|
+        import_certificate(certificate_path: clave, keychain_path: keychain, keychain_password: "", log_output: true)
+      end
+      Dir[File.join(certs_in, "*.cer")].each do |cer|
+        import_certificate(certificate_path: cer, keychain_path: keychain, keychain_password: "", log_output: true)
+      end
+    end
+    cert(
+      api_key: api_key,
+      development: false,
+      keychain_path: keychain,
+      keychain_password: "",
+      output_path: "certs_out"
+    )
+    dist_cert_id = lane_context[SharedValues::CERT_CERTIFICATE_ID]
+    sigh(api_key: api_key, app_identifier: BUNDLE_ID, cert_id: dist_cert_id, force: true)
+    update_code_signing_settings(
+      path: "Arduz.xcodeproj",
+      use_automatic_signing: false,
+      team_id: TEAM_ID,
+      code_sign_identity: "Apple Distribution",
+      profile_name: lane_context[SharedValues::SIGH_NAME],
+      bundle_identifier: BUNDLE_ID
+    )
+    build_app(
+      project: "Arduz.xcodeproj",
+      scheme: "Arduz",
+      configuration: "Release",
+      export_method: "app-store",
+      export_team_id: TEAM_ID,
+      output_directory: "build/ipa"
+    )
+    ipa = lane_context[SharedValues::IPA_OUTPUT_PATH]
+    mb = File.size(ipa) / (1024.0 * 1024.0)
+    UI.message("IPA: #{ipa} (#{mb.round(1)} MB)")
+    # FRENO: el juego de Arduz son ~3500 recursos en www (~140 MB sin comprimir). Si el IPA sale chico,
+    # le falta el juego adentro y NO se sube.
+    UI.user_error!("El IPA salio de #{mb.round(1)} MB; se esperan >40 MB (le falta el juego adentro). NO se sube.") if mb < 40
+    upload_to_testflight(api_key: api_key, skip_waiting_for_build_processing: true)
+  end
+
+  # Enviar a REVISION un build ya subido. Variables de entorno (las arma el workflow):
+  #   BUILD_NUMERO = CFBundleVersion del build (ej. 26.0902.1158)
+  #   VERSION_MKT  = version de marketing (VERSION_MARKETING de variables.txt, ej. 1.4)
+  #   NOTAS_ES / NOTAS_EN = "Novedades" (notas_version.txt)
+  #   PLATAFORMA   = ios | osx
+  lane :enviar_revision do
+    api_key = app_store_connect_api_key(
+      key_id: ENV["ASC_KEY_ID"],
+      issuer_id: ENV["ASC_ISSUER_ID"],
+      key_filepath: ENV["ASC_KEY_PATH"]
+    )
+    numero   = ENV["BUILD_NUMERO"].to_s.strip
+    # 01-11-2026: notas_version.txt trae TODO en una linea por idioma; un \n literal (barra + n) es un salto de
+    # linea en la tienda. Apple admite hasta 4000 caracteres por idioma.
+    notas_es = ENV["NOTAS_ES"].to_s.strip.gsub('\\n', "\n")[0, 4000].to_s
+    notas_en = ENV["NOTAS_EN"].to_s.strip.gsub('\\n', "\n")[0, 4000].to_s
+    notas_en = notas_es if notas_en.empty?
+    notas_pt = ENV["NOTAS_PT"].to_s.strip.gsub('\\n', "\n")[0, 4000].to_s
+    notas_pt = notas_en if notas_pt.empty?
+    es_mac   = ENV["PLATAFORMA"].to_s == "osx"
+    nombre   = es_mac ? "macOS" : "iOS"
+    UI.user_error!("Falta BUILD_NUMERO (el CFBundleVersion del build a enviar)") if numero.empty?
+    UI.user_error!("Faltan las notas de la version (linea ES= de notas_version.txt)") if notas_es.empty?
+    # Apple normaliza el numero de build (26.0902.1333 -> 26.902.1333): se compara sin ceros a la izquierda.
+    normal = lambda { |v| v.to_s.split(".").map { |c| c.sub(/\A0+(?=\d)/, "") }.join(".") }
+
+    plat = es_mac ? Spaceship::ConnectAPI::Platform::MAC_OS : Spaceship::ConnectAPI::Platform::IOS
+    app  = app_arduz
+
+    # 1) Esperar a que Apple termine de PROCESAR el build (5-30 min despues de subirlo).
+    #    La version de marketing sale del build mismo (la que quedo en su Info.plist).
+    UI.message("Esperando que Apple procese el build #{numero} (#{nombre})...")
+    limite = Time.now + 45 * 60
+    build  = nil
+    loop do
+      build  = Spaceship::ConnectAPI::Build.all(app_id: app.id, build_number: numero, platform: plat).first
+      build ||= Spaceship::ConnectAPI::Build.all(app_id: app.id, build_number: normal.call(numero), platform: plat).first
+      estado = build ? build.processing_state.to_s : "todavia no aparece"
+      break if build && estado == "VALID"
+      if %w[FAILED INVALID].include?(estado)
+        UI.user_error!("Apple marco el build #{numero} como #{estado}. Revisa el mail de App Store Connect (errores ITMS-xxxx), corregi y volve a compilar.")
+      end
+      if Time.now > limite
+        UI.user_error!("Pasaron 45 min y el build #{numero} sigue '#{estado}'. Reintenta mas tarde SIN recompilar: <bat> /enviar #{numero}")
+      end
+      UI.message("  ... #{estado}; vuelvo a mirar en 60 s")
+      sleep(60)
+    end
+    version = build.app_version.to_s
+    version = ENV["VERSION_MKT"].to_s.strip if version.empty?
+    UI.user_error!("No pude saber la version de marketing del build #{numero}") if version.empty?
+    UI.success("Build #{numero} procesado por Apple (VALID); version #{version}.")
+
+    # 1b) Si esa version YA esta en revision: con este mismo build no hay nada que hacer; con
+    #     otro build se la saca de revision (= "Remove from Review") y se reenvia con el nuevo,
+    #     asi el build mas nuevo es siempre el que queda en revision.
+    edit = app.get_edit_app_store_version(platform: plat)
+    if edit
+      estado_v = ((edit.respond_to?(:app_version_state) && edit.app_version_state) || edit.app_store_state).to_s
+      if %w[WAITING_FOR_REVIEW IN_REVIEW].include?(estado_v)
+        actual = edit.build ? normal.call(edit.build.version) : ""
+        if actual == normal.call(numero)
+          UI.success("#{nombre} #{edit.version_string} ya esta EN REVISION con este mismo build (#{numero}). Nada que hacer.")
+          next
+        end
+        UI.important("#{nombre} #{edit.version_string} estaba EN REVISION con el build #{actual.empty? ? '?' : actual}: se saca de revision para reemplazarlo por #{numero}.")
+        en_curso = app.get_in_progress_review_submission(platform: plat)
+        en_curso.cancel_submission if en_curso
+        sleep(10)
+      end
+    end
+    # 17-10-2026: Apple NO deja crear otra version (error "You cannot create a new version of the App in the
+    # current state") mientras haya una de esta plataforma en camino: en revision, aprobada y procesandose, o
+    # recien sacada de revision y todavia cambiando de estado. Se espera hasta 20 min a que se destrabe; si no,
+    # se corta con el aviso de reintentar SIN recompilar (enviar_todas lo reintenta solo mas tarde).
+    trabados = %w[WAITING_FOR_REVIEW IN_REVIEW PENDING_APPLE_RELEASE PENDING_DEVELOPER_RELEASE
+                  PROCESSING_FOR_APP_STORE PROCESSING_FOR_DISTRIBUTION WAITING_FOR_EXPORT_COMPLIANCE]
+    estado_de = lambda { |v| ((v.respond_to?(:app_version_state) && v.app_version_state) || v.app_store_state).to_s }
+    limite_v = Time.now + 20 * 60
+    ya_en_revision = false
+    loop do
+      trabada = app.get_app_store_versions.find do |v|
+        v.platform.to_s == plat.to_s && trabados.include?(estado_de.call(v))
+      end
+      break unless trabada
+      est = estado_de.call(trabada)
+      if Time.now > limite_v
+        UI.user_error!("#{nombre} #{trabada.version_string} sigue '#{est}' en Apple y no deja crear otra version todavia. Reintenta mas tarde SIN recompilar: <bat> /enviar #{numero}")
+      end
+      if %w[WAITING_FOR_REVIEW IN_REVIEW].include?(est)
+        # si es ESTE mismo build el que ya esta en revision, no hay nada que hacer
+        b_tr = (trabada.build rescue nil)
+        if b_tr && normal.call(b_tr.version) == normal.call(numero)
+          ya_en_revision = true
+          break
+        end
+        # en revision con OTRO build y no se pudo sacar arriba: se intenta sacar de nuevo
+        en_curso = app.get_in_progress_review_submission(platform: plat)
+        en_curso.cancel_submission if en_curso
+      end
+      UI.message("  ... #{nombre} #{trabada.version_string} esta '#{est}': espero 60 s a que Apple la destrabe")
+      sleep(60)
+    end
+    if ya_en_revision
+      UI.success("#{nombre} ya esta EN REVISION con este mismo build (#{numero}). Nada que hacer.")
+      next
+    end
+    # Un envio armado pero no mandado (items sin submit) bloquea a deliver: se descarta.
+    listo = app.get_ready_review_submission(platform: plat, includes: "items")
+    if listo && listo.items && !listo.items.empty?
+      UI.important("Habia un envio a medio armar en App Store Connect: se descarta.")
+      listo.cancel_submission
+    end
+
+    # 2) Notas en TODOS los idiomas que ya tiene la ficha (Apple exige "Novedades" en cada uno).
+    fuente  = app.get_edit_app_store_version(platform: plat) || app.get_live_app_store_version(platform: plat)
+    locales = fuente ? fuente.get_app_store_version_localizations.map(&:locale) : []
+    locales = ["es-MX"] if locales.empty?
+    notas = {}
+    locales.each do |l|
+      notas[l] = if l.to_s.start_with?("es") then notas_es
+                 elsif l.to_s.start_with?("pt") then notas_pt
+                 else notas_en
+                 end
+    end
+    UI.message("Notas de la version para: #{locales.join(', ')}")
+
+    # 3) Version (se crea si no existe) + notas + build + Submit for Review.
+    #    automatic_release: se publica sola cuando Apple la aprueba (nada queda pendiente).
+    upload_to_app_store(
+      api_key: api_key,
+      app_identifier: app.bundle_id,
+      platform: es_mac ? "osx" : "ios",
+      app_version: version,
+      build_number: numero,
+      skip_binary_upload: true,
+      skip_screenshots: true,
+      release_notes: notas,
+      force: true,
+      run_precheck_before_submit: false,
+      precheck_include_in_app_purchases: false,
+      submit_for_review: true,
+      automatic_release: true,
+      submission_information: {
+        add_id_info_uses_idfa: false,
+        export_compliance_uses_encryption: false,
+        export_compliance_encryption_updated: false
+      }
+    )
+    UI.success("ENVIADO A REVISION: #{nombre} #{version} (build #{numero}). Se publica sola cuando Apple la apruebe.")
+  end
+
+  # Version de marketing EFECTIVA para compilar: VERSION_MKT (variables.txt) o, si Apple ya
+  # cerro ese "train" (esa version esta publicada/aprobada en iOS o en Mac), la siguiente
+  # (1.4 -> 1.5). Se mira el app record entero para que iOS y Mac queden alineadas.
+  # Escribe version_efectiva.txt (lo lee el workflow antes de compilar).
+  lane :version_efectiva do
+    app_store_connect_api_key(
+      key_id: ENV["ASC_KEY_ID"],
+      issuer_id: ENV["ASC_ISSUER_ID"],
+      key_filepath: ENV["ASC_KEY_PATH"]
+    )
+    pedida = ENV["VERSION_MKT"].to_s.strip
+    app = app_arduz
+    cerrados = %w[READY_FOR_SALE READY_FOR_DISTRIBUTION PENDING_DEVELOPER_RELEASE REPLACED_WITH_NEW_VERSION
+                  REMOVED_FROM_SALE DEVELOPER_REMOVED_FROM_SALE PROCESSING_FOR_APP_STORE PROCESSING_FOR_DISTRIBUTION]
+    mayor = nil
+    app.get_app_store_versions.each do |v|
+      estado = ((v.respond_to?(:app_version_state) && v.app_version_state) || v.app_store_state).to_s
+      next unless cerrados.include?(estado)
+      mayor = v.version_string if mayor.nil? || Gem::Version.new(v.version_string) > Gem::Version.new(mayor)
+    end
+    efectiva = pedida
+    if mayor && (pedida.empty? || Gem::Version.new(pedida) <= Gem::Version.new(mayor))
+      partes = mayor.split(".")
+      partes[-1] = (partes[-1].to_i + 1).to_s
+      efectiva = partes.join(".")
+      UI.important("VERSION_MARKETING=#{pedida} ya esta publicada/cerrada en Apple (ultima cerrada: #{mayor}): se compila como #{efectiva}.")
+    end
+    UI.user_error!("No hay version de marketing (VERSION_MARKETING vacia y nada publicado)") if efectiva.empty?
+    # Ruta ABSOLUTA: fastlane corre los lanes con cwd = carpeta fastlane/, no la del
+    # proyecto (arduz_ios), asi que un nombre relativo lo dejaria en fastlane/version_efectiva.txt
+    # y el bash de despues (cwd = arduz_ios) no lo encontraria ("No such file or directory").
+    File.write(File.join(ENV["HOME"], "version_efectiva.txt"), efectiva)
+    UI.success("VERSION_EFECTIVA=#{efectiva}")
+  end
+end

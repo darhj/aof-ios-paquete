@@ -1,0 +1,13 @@
+# Notas de la version ("Novedades" / "What's New") que van a Google Play, App Store (iPhone) y Mac App Store.
+# Las leen enviar_todas_las_plataformas.bat, subir_play.bat, compilar_ios_nube.bat y compilar_mac_nube.bat.
+# ES = lo que ve el jugador en espanol. EN = ingles. PT = portugues (si falta, se usa EN).
+# TODO en UNA linea por idioma; un \n (barra + n) dentro de la linea = salto de linea en la tienda.
+# ES_GOOGLE / EN_GOOGLE = version CORTA para Google Play (maximo 500 caracteres); si faltan se usa ES / EN
+# cortado a 500. Apple admite hasta 4000 caracteres.
+# Cambialas antes de cada envio: si son las MISMAS que la vez anterior, el .bat de todas las plataformas
+# entiende que es el mismo envio y retoma solo lo que haya faltado (dentro de las 24 h).
+# Evita los caracteres porcentaje, signo de admiracion de cierre, ampersand, barra vertical, mayor/menor y
+# acento circunflejo.
+ES=Arduz ahora se juega cómodo desde el celular: interfaz táctil en vertical y horizontal, hechizos con un toque (modo automático o manual), poteo rápido con aviso cuando necesitás pociones, Inventario y Hechizos a mano para equipar fácil, y aviso de versión nueva al conectar. Disponible en español, inglés y portugués.
+EN=Arduz is now comfortable to play on your phone: touch controls in portrait and landscape, one-tap spells (automatic or manual mode), fast potions with a reminder when you need them, Inventory and Spells at hand for easy equipping, and a new-version notice when you connect. Available in Spanish, English and Portuguese.
+PT=Agora Arduz é confortável de jogar no celular: controles de toque na vertical e na horizontal, feitiços com um toque (modo automático ou manual), poções rápidas com aviso quando você precisa, Inventário e Feitiços à mão para equipar fácil e aviso de nova versão ao conectar. Disponível em espanhol, inglês e português.

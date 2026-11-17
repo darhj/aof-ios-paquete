@@ -1,0 +1,191 @@
+# ARDUZ: compila el cliente iOS de Arduz en un runner macOS de GitHub, lo SUBE a App Store
+# Connect (app 6799800836, bundle arduzao.com) y lo ENVIA A REVISION. Reusa el certificado
+# Apple Distribution del equipo guardado como artifact (Apple limita cuantos se pueden crear).
+#
+# Vive en la rama ios-arduz del repo PUBLICO darhj/aof-ios-paquete (en un repo publico la Mac
+# de GitHub Actions es gratis; en el privado darhj/AOForever-completo quedaba bloqueada por
+# facturacion). La rama la arma tools/nube_apple.py (compilar_ios_nube.bat): el workflow, el
+# Fastfile, variables.txt y notas_version.txt salen SIEMPRE de ARDUZ_MULTIPLATAFORMA\cliente_ios.
+name: iOS Arduz - compilar, subir y enviar a revision
+
+on:
+  push:
+    branches: [ios-arduz]
+  workflow_dispatch:
+    inputs:
+      solo_enviar:
+        description: "Solo ENVIAR A REVISION un build ya subido (no compila)"
+        type: boolean
+        default: false
+      build_numero:
+        description: "CFBundleVersion del build a enviar (ej. 26.0902.1158); solo con solo_enviar"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  ASC_KEY_ID: 3F53QY9MCN
+  ASC_ISSUER_ID: 6cbdae36-3638-4704-b22e-efea6a42b4b2
+
+jobs:
+  compilar-subir:
+    # Con solo_enviar no se compila nada: va directo al job enviar-revision.
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.solo_enviar) }}
+    runs-on: macos-26
+    timeout-minutes: 90
+    outputs:
+      build_numero: ${{ steps.subir.outputs.build_numero }}
+      version_efectiva: ${{ steps.subir.outputs.version_efectiva }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Elegir Xcode 26 (Apple exige SDK de iOS 26 para subir)
+        run: |
+          ACTUAL=$(xcodebuild -version | head -1)
+          case "$ACTUAL" in
+            *" 26"*|*" 27"*) echo "Ya esta: $ACTUAL";;
+            *)
+              ULTIMO=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+              if [ -z "$ULTIMO" ]; then
+                echo "::error::Este runner no tiene Xcode 26 (hay: $(ls -d /Applications/Xcode*.app | tr '\n' ' '))"
+                exit 1
+              fi
+              sudo xcode-select -s "$ULTIMO"
+              ;;
+          esac
+          xcodebuild -version
+
+      - name: Rearmar el paquete (zip partido en trozos de <100MB)
+        run: |
+          cat paquete/Arduz-iOS.zip.part-* > "$RUNNER_TEMP/paquete.zip"
+          # NUNCA con unzip: el build 26.810.210 salio de 857KB (sin recursos/)
+          # porque el zip hecho con Compress-Archive traia separadores '\' y el
+          # unzip de macOS no materializo el arbol. El zipfile de Python normaliza
+          # los '\' a '/' al leer, asi que extrae bien CUALQUIERA de los dos zips.
+          python3 -m zipfile -e "$RUNNER_TEMP/paquete.zip" "$HOME/arduz_ios"
+          test -f "$HOME/arduz_ios/App/www/index.html" || { echo "::error::El juego no viajo adentro del zip (falta App/www/index.html)"; exit 1; }
+          # El juego son ~3500 archivos en App/www (recursos/graficos, sonidos, mapas...).
+          # Si el conteo baja, el IPA saldria "vacio": frenar ACA.
+          CANT=$(find "$HOME/arduz_ios/App/www" -type f | wc -l | tr -d ' ')
+          echo "Archivos en App/www: $CANT"
+          if [ "$CANT" -lt 3000 ]; then
+            echo "::error::App/www quedo incompleto tras extraer ($CANT archivos; se esperan ~3500). Zip roto o extraccion fallida."
+            exit 1
+          fi
+          test -f "$HOME/arduz_ios/App/www/recursos/graficos/1.png" || { echo "::error::Faltan los graficos (recursos/graficos) tras extraer."; exit 1; }
+
+      - name: Recuperar certificados ya creados (Apple limita los Apple Distribution - NO crear otro)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CERTS_B64: ${{ secrets.CERTS_B64 }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/certs_in"
+          cd "$GITHUB_WORKSPACE"
+          # El certificado Apple Distribution es del EQUIPO (el mismo para las dos apps de la cuenta).
+          # Lo guardan como artifact las corridas de la otra app de este repo (ramas ios-paquete y
+          # mac-paquete): se toma de la ultima exitosa. Arduz no guarda copias propias (repo publico).
+          for par in "ios-appstore.yml cert-distribution" "macos-appstore.yml certificados-mac"; do
+            set -- $par
+            [ -n "$(ls -A certs_in 2>/dev/null)" ] && break
+            ULT=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$1" --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+            if [ -n "$ULT" ] && [ "$ULT" != "null" ]; then
+              gh run download "$ULT" -R "$GITHUB_REPOSITORY" -n "$2" -D certs_in 2>/dev/null && echo "Certificados: $2 de la corrida $ULT ($1)" || true
+            fi
+          done
+          # Repo nuevo (sin corridas previas): los certificados vienen del secret CERTS_B64 (tar.gz en
+          # base64 de los .p12/.cer/.certSigningRequest que guardo la ultima corrida buena del repo viejo).
+          if [ -z "$(ls -A certs_in 2>/dev/null)" ] && [ -n "$CERTS_B64" ]; then
+            printf '%s' "$CERTS_B64" | base64 -d | tar -xz -C certs_in && echo "Certificados: del secret CERTS_B64"
+          fi
+          [ -n "$(ls -A certs_in 2>/dev/null)" ] || echo "Sin certificados previos: fastlane intentara crear uno (puede chocar con el limite de Apple)"
+          ls -la certs_in || true
+
+      - name: Instalar la clave API de App Store Connect
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [ -z "$ASC_KEY_P8" ]; then
+            echo "::error::Falta el secret ASC_KEY_P8 (contenido del AuthKey_3F53QY9MCN.p8)."
+            exit 1
+          fi
+          mkdir -p "$HOME/private_keys"
+          printf '%s' "$ASC_KEY_P8" > "$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: Compilar, firmar y subir (fastlane)
+        id: subir
+        env:
+          FASTLANE_SKIP_UPDATE_CHECK: "1"
+        run: |
+          # Numero de build UNICO y creciente (Apple rechaza reusar el mismo).
+          NUEVO="26.$(date -u +%m%d).$(date -u +%H%M)"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NUEVO" "$HOME/arduz_ios/App/Info.plist"
+          echo "CFBundleVersion -> $NUEVO"
+          mkdir -p "$HOME/arduz_ios/fastlane"
+          cp "$GITHUB_WORKSPACE/fastlane/Fastfile" "$HOME/arduz_ios/fastlane/Fastfile"
+          export ASC_KEY_PATH="$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          export CERTS_IN="$GITHUB_WORKSPACE/certs_in"
+          cd "$HOME/arduz_ios"
+          # Version de marketing EFECTIVA: la de variables.txt, o la siguiente si Apple ya
+          # cerro ese train (version publicada). Se pisa en Info.plist y en el pbxproj.
+          export VERSION_MKT="$(grep -E '^VERSION_MARKETING=' "$GITHUB_WORKSPACE/variables.txt" 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' \r')"
+          fastlane version_efectiva
+          VEF="$(tr -d ' \r\n' < "$HOME/version_efectiva.txt")"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VEF" App/Info.plist
+          sed -i '' -E "s/MARKETING_VERSION = \"?[0-9.]+\"?;/MARKETING_VERSION = \"$VEF\";/g" Arduz.xcodeproj/project.pbxproj
+          printf 'VERSION_EFECTIVA_PLANA=%s\n' "$VEF"
+          echo "version_efectiva=$VEF" >> "$GITHUB_OUTPUT"
+          fastlane subir
+          echo "Listo: el build quedo subido a App Store Connect."
+          echo "build_numero=$NUEVO" >> "$GITHUB_OUTPUT"
+
+      # NO se suben como artifact ni los certificados ni el IPA: en un repo PUBLICO los artifacts los
+      # puede bajar cualquiera, y el ".p12" que deja fastlane es la CLAVE PRIVADA del certificado.
+      # Los certificados del equipo ya estan guardados (corridas de la otra app / secret CERTS_B64).
+
+  # Envia a REVISION el build recien subido (o uno ya subido, con solo_enviar): espera que
+  # Apple lo procese, crea la version (VERSION_MARKETING de variables.txt), carga las
+  # notas (notas_version.txt), elige el build y hace Submit for Review con release
+  # automatico. Asi no queda nada pendiente para clickear en App Store Connect.
+  enviar-revision:
+    needs: [compilar-subir]
+    if: ${{ always() && (needs.compilar-subir.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.solo_enviar)) }}
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar la clave API de App Store Connect
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          [ -n "$ASC_KEY_P8" ] || { echo "::error::Falta el secret ASC_KEY_P8"; exit 1; }
+          mkdir -p "$HOME/private_keys"
+          printf '%s' "$ASC_KEY_P8" > "$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: Enviar a revision (version + notas + build + Submit for Review)
+        env:
+          FASTLANE_SKIP_UPDATE_CHECK: "1"
+          BUILD_NUMERO_INPUT: ${{ inputs.build_numero }}
+          BUILD_NUMERO_JOB: ${{ needs.compilar-subir.outputs.build_numero }}
+          VERSION_EFECTIVA_JOB: ${{ needs.compilar-subir.outputs.version_efectiva }}
+          PLATAFORMA: ios
+        run: |
+          NUMERO="${BUILD_NUMERO_INPUT:-$BUILD_NUMERO_JOB}"
+          [ -n "$NUMERO" ] || { echo "::error::No se cual build enviar (falta build_numero)"; exit 1; }
+          leer() { grep -E "^$1=" "$2" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r' | sed 's/^ *//;s/ *$//'; }
+          # La version real sale del build subido; esto es solo un respaldo.
+          export VERSION_MKT="${VERSION_EFECTIVA_JOB:-$(leer VERSION_MARKETING variables.txt)}"
+          export NOTAS_ES="$(leer ES notas_version.txt)"
+          export NOTAS_EN="$(leer EN notas_version.txt)"
+          export NOTAS_PT="$(leer PT notas_version.txt)"
+          [ -n "$NOTAS_ES" ] || { echo "::error::Falta la linea ES= en notas_version.txt de la rama (corre el .bat de nuevo)"; exit 1; }
+          echo "Build $NUMERO | version (respaldo) $VERSION_MKT | notas: $NOTAS_ES"
+          export ASC_KEY_PATH="$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          export BUILD_NUMERO="$NUMERO"
+          mkdir -p enviar/fastlane
+          cp fastlane/Fastfile enviar/fastlane/Fastfile
+          cd enviar
+          fastlane enviar_revision
