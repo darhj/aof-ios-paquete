@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>es</string>
+	<!-- 17-11-2026: idiomas que la App Store muestra en la ficha ("Idiomas"). El cliente se
+	     juega en espanol, ingles y portugues de Brasil (se elige adentro del juego); sin esta
+	     lista Apple solo muestra el idioma base. -->
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>es</string>
+		<string>en</string>
+		<string>pt-BR</string>
+	</array>
+	<key>CFBundleDisplayName</key>
+	<string>Arduz</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Arduz</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+
+	<!-- Version "de marketing" (la que ve el jugador). Se edita a mano si algun dia se
+	     quiere pasar a 1.1; no la toca el .bat. -->
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION_NAME@</string>
+	<!-- Numero de build. Lo pone compilar_ios.bat a partir del buildId de la web, en
+	     formato punteado (26.0725.1753) para que SIEMPRE crezca: App Store Connect
+	     rechaza una subida cuyo build no sea mayor que el anterior. -->
+	<key>CFBundleVersion</key>
+	<string>@VERSION_CODE@</string>
+
+	<!-- Pantalla de lanzamiento. El dict vacio con solo el color NO es opcional: sin la
+	     clave UILaunchScreen, iOS trata la app como "legacy" y la deja con bandas negras
+	     en vez de ocupar la pantalla entera. El negro evita el flash blanco de arranque
+	     (el index del juego ya tiene fondo negro). -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>FondoLanzamiento</string>
+	</dict>
+
+	<!-- SOLO VERTICAL: la interfaz movil esta dibujada en un lienzo 360x640 (MobileFrame)
+	     y todo lo probado fue en portrait. -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+
+	<!-- MAC: sin UIRequiredDeviceCapabilities/arm64 (la app de Mac sale universal Intel + Apple Silicon). -->
+
+	<!-- Pantalla completa: sin barra de estado y sin que cada pantalla decida por su cuenta. -->
+	<key>UIStatusBarHidden</key>
+	<true/>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+
+	<!-- Evita el cuestionario de exportacion en CADA subida a App Store Connect. El AES
+	     del protocolo entra en la exencion estandar (cifrado de autenticacion). -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<!-- OBLIGATORIO en la Mac App Store (ITMS-90242 si falta): categoria del producto. -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.role-playing-games</string>
+
+	<!-- SIN NSMicrophoneUsageDescription: el cliente de Arduz no tiene voz de party
+	     (no usa getUserMedia). Declarar permisos que no se usan es rechazo en revision. -->
+
+	<!-- NO lleva NSAppTransportSecurity a proposito: el unico destino de red es
+	     wss://gw.arduzao.com/ws, con certificado de una CA publica, y ATS lo acepta sin
+	     una sola clave. Agregar NSAllowsArbitraryLoads solo bajaria la seguridad y habria
+	     que justificarlo en la revision de Apple. -->
+</dict>
+</plist>
