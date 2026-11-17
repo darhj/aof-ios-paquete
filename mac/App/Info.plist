@@ -4,6 +4,15 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>es</string>
+	<!-- 17-11-2026: idiomas que la App Store muestra en la ficha ("Idiomas"). El cliente se
+	     juega en espanol, ingles y portugues de Brasil (se elige adentro del juego); sin esta
+	     lista Apple solo muestra el idioma base. -->
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>es</string>
+		<string>en</string>
+		<string>pt-BR</string>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>AOForever</string>
 	<key>CFBundleExecutable</key>
