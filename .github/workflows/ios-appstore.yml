@@ -30,7 +30,10 @@ jobs:
   compilar-subir:
     # Con solo_enviar no se compila nada: va directo al job enviar-revision.
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.solo_enviar) }}
-    runs-on: macos-26
+    # 18-11-2026: Apple (ITMS-90725) avisa que desde abril de 2027 las apps de iOS / iPadOS se tienen que compilar
+    # con el SDK de iOS 27 (Xcode 27). La imagen "xcode-27" de GitHub (macOS 27 + Xcode 27, solo arm64) ya esta
+    # disponible para todos (16-10-2026). Antes era macos-26, que compila con el SDK de iOS 26.5.
+    runs-on: xcode-27
     timeout-minutes: 90
     outputs:
       build_numero: ${{ steps.subir.outputs.build_numero }}
@@ -40,21 +43,30 @@ jobs:
         with:
           ref: ios-paquete
 
-      - name: Elegir Xcode 26 (Apple exige SDK de iOS 26 para subir)
+      - name: Elegir Xcode 27 (Apple exige el SDK de iOS 27 desde abril de 2027)
         run: |
           ACTUAL=$(xcodebuild -version | head -1)
           case "$ACTUAL" in
-            *" 26"*|*" 27"*) echo "Ya esta: $ACTUAL";;
+            *" 27"*|*" 28"*) echo "Ya esta: $ACTUAL";;
             *)
-              ULTIMO=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+              ULTIMO=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1)
               if [ -z "$ULTIMO" ]; then
-                echo "::error::Este runner no tiene Xcode 26 (hay: $(ls -d /Applications/Xcode*.app | tr '\n' ' '))"
+                echo "::error::Este runner no tiene Xcode 27 (hay: $(ls -d /Applications/Xcode*.app | tr '\n' ' '))"
                 exit 1
               fi
               sudo xcode-select -s "$ULTIMO"
               ;;
           esac
           xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
+
+      - name: Herramientas (fastlane y gh)
+        # La imagen xcode-27 trae otras herramientas que macos-26: si falta alguna se instala (si ya esta, no hace nada).
+        run: |
+          command -v fastlane >/dev/null 2>&1 || brew install fastlane
+          command -v gh >/dev/null 2>&1 || brew install gh
+          fastlane --version | tail -1 || true
+          gh --version | head -1
 
       - name: Rearmar el paquete (zip partido en trozos de <100MB)
         run: |
