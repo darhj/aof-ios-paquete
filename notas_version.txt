@@ -6,7 +6,7 @@
 # ES_GOOGLE / EN_GOOGLE = version CORTA para Google Play (maximo 500 caracteres); si faltan se usa ES/EN cortado a 500.
 # En las notas no van los caracteres porcentaje, signo de admiracion de cierre, ampersand, barra vertical, mayor/menor
 # ni acento circunflejo: rompen los .bat que las muestran.
-ES=Fixes generales app AOForever
-EN=General fixes AOForever app
-ES_GOOGLE=Fixes generales app AOForever
-EN_GOOGLE=General fixes AOForever app
+ES=Fixes generales
+EN=General fixes
+ES_GOOGLE=Fixes generales
+EN_GOOGLE=General fixes
